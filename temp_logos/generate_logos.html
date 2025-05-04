@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Generate Logo Images</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    canvas { border: 1px solid #ccc; margin: 10px 0; }
+    button { padding: 10px; margin: 10px 0; }
+  </style>
+</head>
+<body>
+  <h1>Generate Logo Images</h1>
+  
+  <canvas id="canvas192" width="192" height="192"></canvas>
+  <br>
+  <a id="download192" download="logo192.png">Download logo192.png</a>
+  
+  <br><br>
+  
+  <canvas id="canvas512" width="512" height="512"></canvas>
+  <br>
+  <a id="download512" download="logo512.png">Download logo512.png</a>
+  
+  <script>
+    function drawLogo(canvas, size) {
+      const ctx = canvas.getContext('2d');
+      
+      // Background
+      ctx.fillStyle = '#00796B';
+      ctx.fillRect(0, 0, size, size);
+      
+      // Text
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = `bold ${size/4}px Arial`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('EMS', size/2, size/2);
+      
+      return canvas.toDataURL('image/png');
+    }
+    
+    // Generate logo192.png
+    const canvas192 = document.getElementById('canvas192');
+    const dataUrl192 = drawLogo(canvas192, 192);
+    document.getElementById('download192').href = dataUrl192;
+    
+    // Generate logo512.png
+    const canvas512 = document.getElementById('canvas512');
+    const dataUrl512 = drawLogo(canvas512, 512);
+    document.getElementById('download512').href = dataUrl512;
+  </script>
+</body>
+</html>

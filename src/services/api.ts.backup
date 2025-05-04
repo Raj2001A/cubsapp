@@ -1,0 +1,935 @@
+/**
+ * API Service for connecting to the backend
+ */
+/**
+import { retryOperation, isOffline, checkApiAvailability } from '../utils/errorHandling';
+import logger from '../utils/logger';
+import { getOrFetchData } from '../utils/cacheUtils';
+import requestQueueManager, { RequestPriority } from '../utils/requestQueueManager';
+
+import { API_ENDPOINT, USE_MOCK_BACKEND } from '../config';
+import { mockBackendService } from './mockBackendService';
+
+// Helper: use mock or real API
+// Reads from USE_MOCK_BACKEND in config.ts, which is set by VITE_USE_MOCK_BACKEND in .env
+import { USE_MOCK_BACKEND } from '../config';
+import { mockBackendService } from './mockBackendService';
+
+
+/**
+ 
+ */
+import { API_ENDPOINT, USE_MOCK_BACKEND } from '../config';
+import { mockBackendService } from './mockBackendService';
+
+
+const api = useMock
+  ? mockBackendService
+  : {
+    // API base URL from config
+    const API_BASE_URL = API_ENDPOINT;
+
+    // Default headers for API requests
+    const defaultHeaders = {
+      'Content-Type': 'application/json',
+    };
+
+    // Timeout for API requests (in milliseconds)
+    const API_TIMEOUT = 15000; // 15 seconds - reduced from 30 seconds for better user experience
+
+    // API concurrency limits
+    const MAX_CONCURRENT_REQUESTS = 20; // Maximum concurrent requests
+    const MAX_CONCURRENT_REQUESTS_PER_ENDPOINT = 5; // Maximum concurrent requests per endpoint
+
+    // Track concurrent requests
+    const concurrentRequests = new Map<string, number>();
+    const totalConcurrentRequests = { count: 0 };
+
+    // Track request start times for timeout detection
+    const requestStartTimes = new Map<string, number>();
+
+    // Helper function for handling API responses
+    type ApiResponseWithMessage = { message?: string };
+    const handleResponse = async <T = any>(response: Response): Promise<T & ApiResponseWithMessage> => {
+      // Defensive: log and check for invalid response object
+      logger.debug('[handleResponse] Incoming response:', {
+        url: response?.url,
+        status: response?.status,
+        ok: response?.ok,
+        headers: response?.headers,
+        response
+      });
+
+      // Enhanced defensive check for valid response and headers
+      if (
+        !response ||
+        typeof response !== 'object' ||
+        !('headers' in response) ||
+        !response.headers ||
+        typeof (response as any).headers.get !== 'function'
+      ) {
+        logger.error('[handleResponse] Invalid response object received', { response });
+        throw new Error('Invalid response object received');
+      }
+
+      // Handle non-JSON responses
+      const contentType = response.headers.get('content-type');
+
+      // Special handling for database connection errors (usually 500 errors)
+      if (!response.ok && response.status === 500) {
+        try {
+          // Try to get the error details
+          const errorData = await response.json();
+          const errorMessage = errorData.message || `Server Error: ${response.statusText}`;
+
+          // Check if it's a database connection error
+          if (errorData.error && typeof errorData.error === 'string' &&
+              (errorData.error.includes('database') || errorData.error.includes('connection'))) {
+            const dbError = new Error('Database connection error: ' + errorMessage);
+            (dbError as any).status = response.status;
+            (dbError as any).data = errorData;
+            (dbError as any).isDatabaseError = true;
+            throw dbError;
+          }
+
+          // Generic server error
+          const serverError = new Error('Server error: ' + errorMessage);
+          (serverError as any).status = response.status;
+          (serverError as any).data = errorData;
+          throw serverError;
+        } catch (jsonError) {
+          // If we can't parse JSON, it's still a server error
+          const genericError = new Error(`Server error (possibly database connection issue): ${response.statusText}`);
+          (genericError as any).status = response.status;
+          (genericError as any).isDatabaseError = true;
+          throw genericError;
+        }
+      }
+
+      // Normal JSON response handling
+      if (contentType && contentType.includes('application/json')) {
+        try {
+          const data = await response.json();
+
+          if (!response.ok) {
+            // If the response contains an error message, use it
+            const errorMessage = data.message || `Error ${response.status}: ${response.statusText}`;
+            const error = new Error(errorMessage);
+            (error as any).status = response.status;
+            (error as any).data = data;
+            throw error;
+          }
+
+          // Defensive: if data is undefined/null, return empty object
+          if (data === undefined || data === null) {
+            return {} as T & ApiResponseWithMessage;
+          }
+          // Defensive: if data is not object/array, wrap in object
+          if (typeof data !== 'object') {
+            return { data } as unknown as T & ApiResponseWithMessage;
+          }
+          // Defensive: if data is array, wrap in { data: [...] }
+          if (Array.isArray(data)) {
+            return { data } as unknown as T & ApiResponseWithMessage;
+          }
+          // If already object, return as is
+          return data;
+        } catch (jsonError) {
+          if (response.ok) {
+            // If the response is OK but we can't parse JSON, return empty object
+            // Return an empty object but force cast to T for type safety
+            return {} as T & ApiResponseWithMessage;
+          } else {
+            // If the response is not OK and we can't parse JSON, throw error
+            const error = new Error(`Error ${response.status}: ${response.statusText}`);
+            (error as any).status = response.status;
+            throw error;
+          }
+        }
+      } else {
+        // Handle non-JSON responses (like binary data)
+        if (!response.ok) {
+          const error = new Error(`Error ${response.status}: ${response.statusText}`);
+          (error as any).status = response.status;
+          throw error;
+        }
+        // Return the Response object but force cast to T for type safety
+        return (response as unknown) as T & ApiResponseWithMessage;
+      }
+    };
+
+    // Defensive wrapper for handleResponse
+    const safeHandleResponse = async <T = any>(response: Response | undefined): Promise<T & ApiResponseWithMessage> => {
+      if (!response || typeof response !== 'object' || !('headers' in response) || !response.headers || typeof (response as any).headers.get !== 'function') {
+        logger.error('[safeHandleResponse] No valid response object received', { response });
+        throw new Error('No valid response from server');
+      }
+      try {
+        logger.debug('[safeHandleResponse] Passing response to handleResponse:', response);
+        return await handleResponse<T>(response);
+      } catch (err: any) {
+        if (response) {
+          logger.error('[safeHandleResponse] Error handling response', {
+            error: err,
+            url: response.url,
+            status: response.status
+          });
+        } else {
+          logger.error('[safeHandleResponse] Error handling response', {
+            error: err
+          });
+        }
+        throw err;
+      }
+    };
+
+    // Create a fetch function with timeout and request deduplication
+    const fetchWithTimeout = async <T = any>(url: string, options: RequestInit = {}, priority: RequestPriority = RequestPriority.NORMAL): Promise<T> => {
+      logger.info('[fetchWithTimeout] Request started', { url, options, priority });
+      // Check if we're offline
+      if (isOffline()) {
+        logger.warn('Offline mode detected, cannot make API request');
+        throw new Error('You are currently offline. Please check your internet connection and try again.');
+      }
+
+      // Create a request key based on the URL and method
+      const requestKey = `${options.method || 'GET'}_${url}`;
+
+      // Generate a unique request ID for tracking
+      const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+      logger.debug(`[fetchWithTimeout] url=${url}, options=`, options);
+
+      // Extract endpoint for circuit breaker
+      const urlObj = new URL(url.startsWith('http') ? url : `http://localhost${url}`);
+      const endpoint = urlObj.pathname;
+
+      // Track request start time
+      requestStartTimes.set(requestId, Date.now());
+
+      // Check if we've reached the maximum number of concurrent requests
+      if (totalConcurrentRequests.count >= MAX_CONCURRENT_REQUESTS && priority !== RequestPriority.HIGH) {
+        logger.warn('Maximum concurrent requests reached, rejecting request', {
+          url,
+          method: options.method || 'GET',
+          totalConcurrent: totalConcurrentRequests.count,
+          maxConcurrent: MAX_CONCURRENT_REQUESTS
+        });
+
+        // Remove request start time
+        requestStartTimes.delete(requestId);
+
+        throw new Error('Too many concurrent requests. Please try again later.');
+      }
+
+      // Check if we've reached the maximum number of concurrent requests for this endpoint
+      const endpointConcurrent = concurrentRequests.get(endpoint) || 0;
+      if (endpointConcurrent >= MAX_CONCURRENT_REQUESTS_PER_ENDPOINT && priority !== RequestPriority.HIGH) {
+        logger.warn('Maximum concurrent requests for endpoint reached, rejecting request', {
+          url,
+          method: options.method || 'GET',
+          endpoint,
+          endpointConcurrent,
+          maxConcurrentPerEndpoint: MAX_CONCURRENT_REQUESTS_PER_ENDPOINT
+        });
+
+        // Remove request start time
+        requestStartTimes.delete(requestId);
+
+        throw new Error(`Too many concurrent requests to ${endpoint}. Please try again later.`);
+      }
+
+      // Increment concurrent request counts
+      totalConcurrentRequests.count++;
+      concurrentRequests.set(endpoint, endpointConcurrent + 1);
+
+      // Function to decrement concurrent request counts
+      const decrementConcurrentRequests = () => {
+        // Decrement total count
+        if (totalConcurrentRequests.count > 0) {
+          totalConcurrentRequests.count--;
+        }
+
+        // Decrement endpoint count
+        const currentEndpointCount = concurrentRequests.get(endpoint) || 0;
+        if (currentEndpointCount > 0) {
+          concurrentRequests.set(endpoint, currentEndpointCount - 1);
+        } else {
+          concurrentRequests.delete(endpoint);
+        }
+
+        // Remove request start time
+        requestStartTimes.delete(requestId);
+
+        // Log long-running requests
+        const startTime = requestStartTimes.get(requestId);
+        if (startTime) {
+          const duration = Date.now() - startTime;
+          if (duration > 5000) { // 5 seconds
+            logger.warn('Long-running request completed', {
+              url,
+              method: options.method || 'GET',
+              duration,
+              requestId
+            });
+          }
+        }
+      };
+
+      // Determine if this is a critical request that should bypass the queue
+      const isCritical = priority === RequestPriority.HIGH && (
+        url.includes('/health') ||
+        url.includes('/status') ||
+        url.includes('/auth')
+      );
+
+      // For critical requests, bypass the queue and use direct fetch
+      if (isCritical) {
+        logger.debug(`Critical request bypassing queue: ${options.method || 'GET'} ${url}`);
+
+        // Create a new AbortController
+        const controller = new AbortController();
+        const { signal } = controller;
+
+        // Merge the signal with any existing signal in options
+        const mergedOptions = { ...options, signal };
+
+        // Set up timeout
+        const timeoutId = setTimeout(() => {
+          controller.abort();
+          logger.warn(`Critical request timeout for ${url}`, { timeout: API_TIMEOUT });
+        }, API_TIMEOUT);
+
+        try {
+          const response = await fetch(url, mergedOptions);
+          clearTimeout(timeoutId);
+          logger.debug('[fetchWithTimeout] Response received', { url, status: response && 'status' in response ? response.status : undefined });
+          if (!response || typeof response !== 'object' || !('headers' in response) || !response.headers || typeof (response as any).headers.get !== 'function') {
+            logger.error('[fetchWithTimeout] Invalid response object received', { response });
+            throw new Error('[fetchWithTimeout] Invalid response object received');
+          }
+          if (!response.ok) {
+            logger.warn(`[fetchWithTimeout] API request returned status ${response.status}`, { url });
+          }
+          return safeHandleResponse<T>(response); // Use safeHandleResponse instead of handleResponse
+        } catch (error: unknown) {
+          clearTimeout(timeoutId);
+          if (error instanceof Error && error.name === 'AbortError') {
+            const timeoutError = new Error(`Critical request timeout after ${API_TIMEOUT / 1000} seconds`);
+            timeoutError.name = 'TimeoutError';
+            throw timeoutError;
+          }
+          throw error;
+        } finally {
+          // Always decrement concurrent request counts
+          decrementConcurrentRequests();
+        }
+      }
+
+      // For normal requests, use the request queue manager
+      try {
+        return await requestQueueManager.enqueue({
+          url,
+          method: options.method || 'GET',
+          priority,
+          timeout: API_TIMEOUT,
+          tags: [endpoint, requestKey],
+          execute: async () => {
+            // Create a new AbortController
+            const controller = new AbortController();
+            const { signal } = controller;
+
+            // Merge the signal with any existing signal in options
+            const mergedOptions = { ...options, signal };
+
+            logger.debug(`Executing API request: ${options.method || 'GET'} ${url}`);
+
+            try {
+              const response = await fetch(url, mergedOptions);
+
+              // Enhanced defensive check for valid response and headers
+              if (!response || typeof response !== 'object' || !('headers' in response) || !response.headers || typeof (response as any).headers.get !== 'function') {
+                logger.error('[fetchWithTimeout] Invalid response object received', { response });
+                throw new Error('[fetchWithTimeout] Invalid response object received');
+              }
+
+              logger.debug('[fetchWithTimeout] Response received', { url, status: response && 'status' in response ? response.status : undefined });
+              if (!response.ok) {
+                logger.warn(`[fetchWithTimeout] API request returned status ${response.status}`, { url });
+              }
+              return safeHandleResponse<T>(response); // Use safeHandleResponse instead of handleResponse
+            } catch (error: unknown) {
+              if (error instanceof Error && error.name === 'AbortError') {
+                const timeoutError = new Error(`Request timeout after ${API_TIMEOUT / 1000} seconds`);
+                timeoutError.name = 'TimeoutError';
+                throw timeoutError;
+              }
+              throw error;
+            }
+          }
+        });
+      } catch (error: unknown) {
+        throw error;
+      } finally {
+        // Always decrement concurrent request counts
+        decrementConcurrentRequests();
+      }
+    };
+
+    // Check API availability before making requests
+    let isApiAvailable = true;
+    let lastApiCheck = 0;
+    const API_CHECK_INTERVAL = 300000; // 5 minutes
+
+    // Track API availability check requests to prevent multiple simultaneous checks
+    let apiCheckInProgress = false;
+    let apiCheckPromise: Promise<boolean> | null = null;
+
+    const ensureApiAvailable = async (): Promise<void> => {
+      // Skip API availability check in development
+      if (import.meta.env.DEV) {
+        return;
+      }
+      const now = Date.now();
+
+      // Only check API availability if it's been more than API_CHECK_INTERVAL since the last check
+      // or if the last check failed
+      if (!isApiAvailable || now - lastApiCheck > API_CHECK_INTERVAL) {
+        // If a check is already in progress, reuse the promise
+        if (apiCheckInProgress && apiCheckPromise) {
+          console.log('API availability check already in progress, reusing promise');
+          const result = await apiCheckPromise;
+          if (!result) {
+            throw new Error('API is currently unavailable. Please try again later.');
+          }
+          return;
+        }
+
+        // Mark check as in progress
+        apiCheckInProgress = true;
+
+        try {
+          // Use the base URL without /api for the health check
+          const baseUrl = API_BASE_URL.replace('/api', '');
+          console.log('Checking API availability from ensureApiAvailable:', baseUrl);
+
+          // Create the promise and store it
+          apiCheckPromise = checkApiAvailability(baseUrl);
+
+          // Wait for the result
+          isApiAvailable = await apiCheckPromise;
+          lastApiCheck = now;
+
+          if (!isApiAvailable) {
+            console.error('API is unavailable');
+            throw new Error('API is currently unavailable. Please try again later.');
+          }
+        } finally {
+          // Clear the in-progress flag and promise
+          apiCheckInProgress = false;
+          apiCheckPromise = null;
+        }
+      }
+    };
+
+    // Define a shared response type for employee endpoints
+    export type EmployeesApiResponse =
+      | any[]
+      | {
+          data: any[];
+          total?: number;
+          page?: number;
+          limit?: number;
+          totalPages?: number;
+          hasNextPage?: boolean;
+          hasPrevPage?: boolean;
+        };
+
+    // Health check endpoint
+    health: {
+      check: async (): Promise<{ status: string } & ApiResponseWithMessage> => {
+        try {
+          // Use high priority to bypass queue and concurrency limits
+          const response = await fetchWithTimeout(`${API_BASE_URL}/health`, {
+            method: 'GET',
+            headers: defaultHeaders,
+            cache: 'no-store' // Prevent caching
+          }, RequestPriority.HIGH);
+
+          return safeHandleResponse<{ status: string }>(response); // Use safeHandleResponse instead of handleResponse
+        } catch (error: unknown) {
+          const errMsg = error instanceof Error ? error.message : String(error);
+          logger.error('Health check failed', { error: errMsg });
+
+          // 
+          return {
+            status: 'error',
+            message: 'Health check failed',
+            error: errMsg
+          } as { status: string } & ApiResponseWithMessage;
+        }
+      },
+
+      getStatus: async (): Promise<{ status: string; uptime: number } & ApiResponseWithMessage> => {
+        try {
+          // Use high priority to bypass queue and concurrency limits
+          const response = await fetchWithTimeout(`${API_BASE_URL}/status`, {
+            method: 'GET',
+            headers: defaultHeaders,
+            cache: 'no-store' // Prevent caching
+          }, RequestPriority.HIGH);
+
+          return safeHandleResponse<{ status: string; uptime: number }>(response); // Use safeHandleResponse instead of handleResponse
+        } catch (error: unknown) {
+          const errMsg = error instanceof Error ? error.message : String(error);
+          logger.error('Status check failed', { error: errMsg });
+
+          // 
+          return {
+            status: 'error',
+            uptime: 0,
+            message: 'Status check failed',
+            error: errMsg,
+            services: {
+              api: false,
+              database: false,
+              websocket: false
+            }
+          } as { status: string; uptime: number } & ApiResponseWithMessage;
+        }
+      }
+    },
+    // Backend management endpoints
+    backend: {
+      /**
+       * Return a consistent response shape for backend health
+       * @returns {Promise<{ status: string; backends?: any[]; message?: string }>}
+       */
+      getStatus: async (): Promise<{ status: string; backends?: any[]; message?: string } & ApiResponseWithMessage> => {
+        try {
+          const response = await fetchWithTimeout(`${API_BASE_URL}/backend/status`, {
+            method: 'GET',
+            headers: defaultHeaders,
+          });
+
+          return safeHandleResponse(response); // Use safeHandleResponse instead of handleResponse
+        } catch (error) {
+          // Return a fallback response if backend is unreachable
+          return {
+            status: 'offline',
+            backends: [],
+            message: 'Backend unreachable',
+          };
+        }
+      },
+
+      checkDatabaseConnection: async (): Promise<{ connected: boolean } & ApiResponseWithMessage> => {
+        try {
+          // Try to fetch a single employee to check database connection
+          const response = await fetchWithTimeout(`${API_BASE_URL}/employees?limit=1`, {
+            method: 'GET',
+            headers: defaultHeaders,
+            cache: 'no-store' // Prevent caching
+          });
+
+          // Add safe response handling
+          try {
+            await safeHandleResponse<any>(response); // Use safeHandleResponse instead of handleResponse
+          } catch (error) {
+            console.error('Error parsing database connection response:', error);
+            return {
+              connected: false,
+              message: 'Database connection failed: Error parsing response'
+            };
+          }
+
+          return {
+            connected: true,
+            message: 'Database connection successful'
+          };
+        } catch (error) {
+          console.error('Database connection check failed:', error);
+          return {
+            connected: false,
+            message: `Database connection failed: ${error instanceof Error ? error.message : String(error)}`
+          };
+        }
+      },
+
+      switchBackend: async (backendId: string): Promise<{ success: boolean } & ApiResponseWithMessage> => {
+        return retryOperation(async () => {
+          await ensureApiAvailable();
+
+          const response = await fetchWithTimeout(`${API_BASE_URL}/backend/switch/${backendId}`, {
+            method: 'POST',
+            headers: defaultHeaders,
+          });
+
+          return safeHandleResponse<{ success: boolean }>(response); // Use safeHandleResponse instead of handleResponse
+        });
+      },
+
+      setStrategy: async (strategy: string): Promise<{ success: boolean } & ApiResponseWithMessage> => {
+        return retryOperation(async () => {
+          await ensureApiAvailable();
+
+          const response = await fetchWithTimeout(`${API_BASE_URL}/backend/strategy`, {
+            method: 'POST',
+            headers: defaultHeaders,
+            body: JSON.stringify({ strategy }),
+          });
+
+          return safeHandleResponse<{ success: boolean }>(response); // Use safeHandleResponse instead of handleResponse
+        });
+      },
+
+      toggleBackend: async (backendId: string, enabled: boolean): Promise<{ success: boolean } & ApiResponseWithMessage> => {
+        return retryOperation(async () => {
+          await ensureApiAvailable();
+
+          const response = await fetchWithTimeout(`${API_BASE_URL}/backend/toggle/${backendId}`, {
+            method: 'POST',
+            headers: defaultHeaders,
+            body: JSON.stringify({ enabled }),
+          });
+
+          return safeHandleResponse<{ success: boolean }>(response); // Use safeHandleResponse instead of handleResponse
+        });
+      },
+    },
+
+    // Employee endpoints
+    employees: {
+      getVisaExpiryReminders: async (limit: number = 10): Promise<{ success: boolean; count: number; data: any[] }> => {
+        return retryOperation(async () => {
+          await ensureApiAvailable();
+
+          // For json-server, we need to filter employees with visa_expiry_date
+          const response = await fetchWithTimeout(`${API_BASE_URL}/employees?_limit=${limit}`, {
+            method: 'GET',
+            headers: defaultHeaders,
+          });
+
+          const data = await safeHandleResponse<any[]>(response); // Use safeHandleResponse instead of handleResponse
+
+          // Filter and transform the data to match the expected format
+          const filtered = data.filter(emp => emp.visa_expiry_date);
+          return {
+            success: true,
+            count: filtered.length,
+            data: filtered
+          };
+        });
+      },
+
+      getAll: async (page?: number, limit?: number): Promise<EmployeesApiResponse & ApiResponseWithMessage> => {
+        // Defensive: sanitize page and limit
+        const safePage = typeof page === 'number' && page > 0 ? page : 1;
+        const safeLimit = typeof limit === 'number' && limit > 0 ? limit : 1000;
+
+        // Create a cache key based on the request parameters
+        const cacheKey = `employees_${safePage}_${safeLimit}`;
+
+        // Use the cache utility to get or fetch data
+        return getOrFetchData(
+          cacheKey,
+          async () => {
+            return retryOperation(async () => {
+              await ensureApiAvailable();
+
+              // Backend API uses page and limit for pagination
+              console.log(`Fetching employees from ${API_BASE_URL}/employees?page=${safePage}&limit=${safeLimit}`);
+              const response = await fetchWithTimeout(`${API_BASE_URL}/employees?page=${safePage}&limit=${safeLimit}`, {
+                method: 'GET',
+                headers: defaultHeaders,
+              });
+              const responseData = await safeHandleResponse<any>(response); // Use safeHandleResponse instead of handleResponse
+
+              // Defensive: check for valid data structure
+              if (!responseData || (typeof responseData === 'object' && !Array.isArray(responseData) && !responseData.data)) {
+                console.error('Invalid API response format:', responseData);
+                throw new Error('Invalid API response format');
+              }
+
+              // If responseData is an array, wrap in an object for consistent access
+              if (Array.isArray(responseData)) {
+                return { data: responseData };
+              }
+              // Otherwise, return as is (should have a 'data' property)
+              return responseData;
+            });
+          },
+          300000 // Cache for 5 minutes
+        );
+      },
+
+      getById: async (id: string): Promise<{ data: any } & ApiResponseWithMessage> => {
+        return retryOperation(async () => {
+          await ensureApiAvailable();
+
+          const response = await fetchWithTimeout(`${API_BASE_URL}/employees/${id}`, {
+            method: 'GET',
+            headers: defaultHeaders,
+          });
+
+          const data = await safeHandleResponse<any>(response); // Use safeHandleResponse instead of handleResponse
+
+          // Transform the data to match the expected format
+          return {
+            success: true,
+            data
+          } as { data: any } & ApiResponseWithMessage;
+        });
+      },
+
+      create: async (employeeData: any): Promise<any & ApiResponseWithMessage> => {
+        return retryOperation(async () => {
+          await ensureApiAvailable();
+
+          const response = await fetchWithTimeout(`${API_BASE_URL}/employees`, {
+            method: 'POST',
+            headers: defaultHeaders,
+            body: JSON.stringify(employeeData),
+          });
+
+          return safeHandleResponse<any>(response); // Use safeHandleResponse instead of handleResponse
+        });
+      },
+
+      update: async (id: string, employeeData: any): Promise<any & ApiResponseWithMessage> => {
+        return retryOperation(async () => {
+          await ensureApiAvailable();
+
+          const response = await fetchWithTimeout(`${API_BASE_URL}/employees/${id}`, {
+            method: 'PUT',
+            headers: defaultHeaders,
+            body: JSON.stringify(employeeData),
+          });
+
+          return safeHandleResponse<any>(response); // Use safeHandleResponse instead of handleResponse
+        });
+      },
+
+      delete: async (id: string): Promise<{ success: boolean } & ApiResponseWithMessage> => {
+        return retryOperation(async () => {
+          await ensureApiAvailable();
+
+          const response = await fetchWithTimeout(`${API_BASE_URL}/employees/${id}`, {
+            method: 'DELETE',
+            headers: defaultHeaders,
+          });
+
+          return safeHandleResponse<{ success: boolean }>(response); // Use safeHandleResponse instead of handleResponse
+        });
+      },
+
+      search: async (query: string, page?: number, limit?: number): Promise<EmployeesApiResponse & ApiResponseWithMessage> => {
+        // Create a cache key based on the request parameters
+        const cacheKey = `employees_search_${query}_${page}_${limit}`;
+
+        // Use the cache utility to get or fetch data
+        return getOrFetchData(
+          cacheKey,
+          async () => {
+            return retryOperation(async () => {
+              await ensureApiAvailable();
+
+              const response = await fetchWithTimeout(`${API_BASE_URL}/employees/search/${query}?page=${page}&limit=${limit}`, {
+                method: 'GET',
+                headers: defaultHeaders,
+              });
+
+              const responseData = await safeHandleResponse<EmployeesApiResponse>(response); // Use safeHandleResponse instead of handleResponse
+
+              // Accept both array and object responses for compatibility
+              if (!responseData || (Array.isArray(responseData) && responseData.length === 0) || (typeof responseData === 'object' && !Array.isArray(responseData) && !('data' in responseData))) {
+                console.error('Invalid API response format:', responseData);
+                throw new Error('Invalid API response format');
+              }
+
+              // If responseData is an array, wrap in an object for consistent access
+              if (Array.isArray(responseData)) {
+                return { data: responseData };
+              }
+              // Otherwise, return as is (should have a 'data' property)
+              return responseData;
+            });
+          },
+          300000 // Cache for 5 minutes
+        );
+      },
+
+      getByCompany: async (companyId: string, page?: number, limit?: number): Promise<EmployeesApiResponse & ApiResponseWithMessage> => {
+        // Create a cache key based on the request parameters
+        const cacheKey = `employees_company_${companyId}_${page}_${limit}`;
+
+        // Use the cache utility to get or fetch data
+        return getOrFetchData(
+          cacheKey,
+          async () => {
+            return retryOperation(async () => {
+              await ensureApiAvailable();
+
+              const response = await fetchWithTimeout(`${API_BASE_URL}/employees/company/${companyId}?page=${page}&limit=${limit}`, {
+                method: 'GET',
+                headers: defaultHeaders,
+              });
+
+              const responseData = await safeHandleResponse<EmployeesApiResponse>(response); // Use safeHandleResponse instead of handleResponse
+
+              // Accept both array and object responses for compatibility
+              if (!responseData || (Array.isArray(responseData) && responseData.length === 0) || (typeof responseData === 'object' && !Array.isArray(responseData) && !('data' in responseData))) {
+                console.error('Invalid API response format:', responseData);
+                throw new Error('Invalid API response format');
+              }
+
+              // If responseData is an array, wrap in an object for consistent access
+              if (Array.isArray(responseData)) {
+                return { data: responseData };
+              }
+              // Otherwise, return as is (should have a 'data' property)
+              return responseData;
+            });
+          },
+          300000 // Cache for 5 minutes
+        );
+      },
+    },
+
+    // Company endpoints
+    companies: {
+      getAll: async (): Promise<{ success: boolean; count: number; data: any[] } & ApiResponseWithMessage> => {
+        // Create a cache key
+        const cacheKey = 'companies_all';
+
+        // Use the cache utility to get or fetch data
+        return getOrFetchData(
+          cacheKey,
+          async () => {
+            const response = await fetchWithTimeout(`${API_BASE_URL}/companies`, {
+              method: 'GET',
+              headers: defaultHeaders,
+            });
+
+            const data = await safeHandleResponse<any[]>(response); // Use safeHandleResponse instead of handleResponse
+
+            // Transform the data to match the expected format
+            return {
+              success: true,
+              count: data.length,
+              data
+            } as { success: boolean; count: number; data: any[] } & ApiResponseWithMessage;
+          },
+          600000 // Cache for 10 minutes (companies change less frequently)
+        );
+      },
+
+      getById: async (id: string): Promise<{ success: boolean; data: any } & ApiResponseWithMessage> => {
+        const response = await fetch(`${API_BASE_URL}/companies/${id}`, {
+          method: 'GET',
+          headers: defaultHeaders,
+        });
+
+        const data = await safeHandleResponse<any>(response); // Use safeHandleResponse instead of handleResponse
+
+        // Transform the data to match the expected format
+        return {
+          success: true,
+          data
+        } as { success: boolean; data: any } & ApiResponseWithMessage;
+      },
+
+      create: async (companyData: any): Promise<any & ApiResponseWithMessage> => {
+        const response = await fetch(`${API_BASE_URL}/companies`, {
+          method: 'POST',
+          headers: defaultHeaders,
+          body: JSON.stringify(companyData),
+        });
+
+        return safeHandleResponse<any>(response); // Use safeHandleResponse instead of handleResponse
+      },
+
+      update: async (id: string, companyData: any): Promise<any & ApiResponseWithMessage> => {
+        const response = await fetch(`${API_BASE_URL}/companies/${id}`, {
+          method: 'PUT',
+          headers: defaultHeaders,
+          body: JSON.stringify(companyData),
+        });
+
+        return safeHandleResponse<any>(response); // Use safeHandleResponse instead of handleResponse
+      },
+
+      delete: async (id: string): Promise<{ success: boolean } & ApiResponseWithMessage> => {
+        const response = await fetch(`${API_BASE_URL}/companies/${id}`, {
+          method: 'DELETE',
+          headers: defaultHeaders,
+        });
+
+        return safeHandleResponse<{ success: boolean }>(response); // Use safeHandleResponse instead of handleResponse
+      },
+
+      getWithEmployeeCount: async (): Promise<{ success: boolean; data: any[] } & ApiResponseWithMessage> => {
+        const response = await fetch(`${API_BASE_URL}/companies/stats/employee-count`, {
+          method: 'GET',
+          headers: defaultHeaders,
+        });
+
+        const data = await safeHandleResponse<any[]>(response); // Use safeHandleResponse instead of handleResponse
+        return {
+          success: true,
+          data,
+        } as { success: boolean; data: any[] } & ApiResponseWithMessage;
+      },
+    },
+
+    // Import/Export endpoints
+    import: {
+      importEmployees: async (formData: FormData): Promise<{ success: boolean; imported: number } & ApiResponseWithMessage> => {
+        return retryOperation(async () => {
+          await ensureApiAvailable();
+
+          const response = await fetchWithTimeout(`${API_BASE_URL}/import/employees`, {
+            method: 'POST',
+            body: formData,
+            // Don't set Content-Type header for FormData
+            // The browser will set it automatically with the boundary
+          });
+
+          return safeHandleResponse<{ success: boolean; imported: number }>(response); // Use safeHandleResponse instead of handleResponse
+        });
+      },
+
+      getTemplate: async (): Promise<Response & ApiResponseWithMessage> => {
+        return retryOperation(async () => {
+          await ensureApiAvailable();
+
+          const response = await fetchWithTimeout(`${API_BASE_URL}/import/template`, {
+            method: 'GET',
+          });
+
+          return response; // Return the raw response for blob handling
+        });
+      },
+
+      exportEmployees: async (format: string = 'csv'): Promise<{ success: boolean; data: string } & ApiResponseWithMessage> => {
+        return retryOperation(async () => {
+          await ensureApiAvailable();
+          const response = await fetchWithTimeout(`${API_BASE_URL}/export/employees?format=${format}`, {
+            method: 'GET',
+            headers: defaultHeaders,
+          });
+          // Expecting a CSV string in the response body
+          const data = await safeHandleResponse<{ data: string }>(response);
+          if (!data || typeof data.data !== 'string') {
+            throw new Error('Invalid export response received');
+          }
+          return { ...data, success: true };
+        });
+      },
+    },
+  };
+
+// Export fetchWithTimeout and safeHandleResponse for use in other modules
+export { fetchWithTimeout, safeHandleResponse };
+
+export { api };
+export default api;

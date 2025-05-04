@@ -1,0 +1,7 @@
+{
+  "build": {
+    "environment": {
+      "VITE_API_URL": "https://my-json-server.typicode.com/your-username/employee-management-demo"
+    }
+  }
+}

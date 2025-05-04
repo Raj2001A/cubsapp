@@ -1,0 +1,261 @@
+import React, { useMemo, useState, useEffect } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Plus } from 'lucide-react';
+import { EmployeeStatus } from '../types/employees';
+import { useUI } from '../context/UIContext';
+import { employeeService } from '../services/employeeService';
+import { companyService } from '../services/companyService';
+import ConfirmationModal from './ui/ConfirmationModal';
+import ResponsiveTable from './ui/ResponsiveTable';
+import LoadingSpinner from './ui/LoadingSpinner';
+
+interface EmployeeListProps {
+  searchQuery?: string;
+  onViewEmployee: (id: string) => void;
+}
+
+const PAGE_SIZE = 20;
+
+const EmployeeList: React.FC<EmployeeListProps> = ({ searchQuery = '', onViewEmployee }) => {
+  const navigate = useNavigate();
+  const [filterStatus, setFilterStatus] = useState<'all' | EmployeeStatus>('all');
+  const [companyId, setCompanyId] = useState<string>('');
+  const [companies, setCompanies] = useState<any[]>([]);
+  const uiContext = useUI();
+  const [employees, setEmployees] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState<{ 
+    isOpen: boolean; 
+    employeeId: string; 
+    employeeName: string 
+  }>({
+    isOpen: false, 
+    employeeId: '', 
+    employeeName: ''
+  });
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  useEffect(() => {
+    // Fetch companies on mount
+    companyService.getAll()
+      .then((res: any[]) => setCompanies(res || []))
+      .catch(err => uiContext.showToast(err?.message || 'Failed to fetch companies.', 'error'));
+  }, []);
+
+  useEffect(() => {
+    setIsLoading(true);
+    const fetch = async () => {
+      let result;
+      if (companyId) {
+        result = await employeeService.getByCompany(companyId, page, PAGE_SIZE);
+      } else {
+        result = await employeeService.getAll(page, PAGE_SIZE);
+      }
+      setEmployees(result.employees);
+      setTotalPages(result.totalPages || Math.ceil(result.employees.length / PAGE_SIZE));
+      setIsLoading(false);
+    };
+    fetch().catch(err => {
+      uiContext.showToast(err?.message || 'Failed to fetch employees.', 'error');
+      setIsLoading(false);
+    });
+  }, [page, companyId]);
+
+  // Handle deleting an employee
+  const handleDeleteEmployee = (employeeId: string, employeeName: string) => {
+    setDeleteConfirmation({
+      isOpen: true,
+      employeeId,
+      employeeName
+    });
+  };
+
+  // Confirm and execute employee deletion
+  const confirmDeleteEmployee = async () => {
+    try {
+      setIsDeleting(true);
+
+      // Call the API to delete the employee
+      await employeeService.delete(deleteConfirmation.employeeId);
+      
+      // Re-fetch employees after successful deletion
+      const result = await employeeService.getAll(page, PAGE_SIZE);
+      setEmployees(result.employees);
+      setTotalPages(result.totalPages || 1);
+
+      // Close the confirmation modal
+      setDeleteConfirmation({
+        isOpen: false,
+        employeeId: '',
+        employeeName: ''
+      });
+
+      // Show success message
+      uiContext.showToast('Employee deleted successfully', 'success');
+    } catch (error) {
+      uiContext.showToast('Failed to delete employee', 'error');
+      console.error('Error deleting employee:', error);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  // Handle adding a new employee
+  const handleAddEmployee = async (employeeData: any) => {
+    try {
+      // Set loading state
+      setIsLoading(true);
+
+      // Use the employeeService.create function
+      await employeeService.create({
+        employeeId: employeeData.employeeId,
+        name: employeeData.name,
+        trade: employeeData.trade,
+        nationality: employeeData.nationality,
+        joinDate: employeeData.joinDate,
+        dateOfBirth: employeeData.dateOfBirth,
+        mobileNumber: employeeData.mobileNumber,
+        homePhoneNumber: employeeData.homePhoneNumber || '',
+        email: employeeData.email,
+        companyId: employeeData.companyId,
+        companyName: employeeData.companyName,
+        department: employeeData.department || '',
+        position: employeeData.position || '',
+        visaStatus: employeeData.visaStatus || 'active',
+        visaExpiryDate: employeeData.visaExpiryDate || '',
+        documents: employeeData.documents || [],
+        emergencyContact: employeeData.emergencyContact
+      } as any);
+
+      // Re-fetch employees after successful creation
+      const result = await employeeService.getAll(page, PAGE_SIZE);
+      setEmployees(result.employees);
+      setTotalPages(result.totalPages || 1);
+
+      // Close the modal
+      setIsAddModalOpen(false);
+      
+      // Show success message
+      uiContext.showToast('Employee added successfully', 'success');
+    } catch (error) {
+      uiContext.showToast('Failed to add employee', 'error');
+      console.error('Error adding employee:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Filter and search employees using useMemo for performance
+  const filteredEmployees = useMemo(() => {
+    return employees.filter(employee => {
+      const matchesSearch =
+        (employee.firstName?.toLowerCase() ?? '').includes(searchQuery.toLowerCase()) ||
+        (employee.lastName?.toLowerCase() ?? '').includes(searchQuery.toLowerCase()) ||
+        (employee.position?.toLowerCase() ?? '').includes(searchQuery.toLowerCase()) ||
+        (employee.department?.toLowerCase() ?? '').includes(searchQuery.toLowerCase());
+
+      const matchesStatus =
+        filterStatus === 'all' ||
+        employee.status === filterStatus ||
+        (typeof employee.status === 'string' && filterStatus === EmployeeStatus.ACTIVE && employee.status === 'active') ||
+        (typeof employee.status === 'string' && filterStatus === EmployeeStatus.INACTIVE && employee.status === 'inactive');
+
+      return matchesSearch && matchesStatus;
+    });
+  }, [employees, searchQuery, filterStatus]);
+
+  return (
+    <>
+      {/* Main content */}
+      <div className="flex flex-col space-y-6">
+        <div className="flex justify-between items-center">
+          <h1 className="text-2xl font-bold text-gray-900">Employees</h1>
+          <button
+            onClick={() => setIsAddModalOpen(true)}
+            className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
+          >
+            <Plus className="-ml-1 mr-2 h-5 w-5" aria-hidden="true" />
+            Add Employee
+          </button>
+        </div>
+
+        {/* Employee data display */}
+        {isLoading ? (
+          <div className="flex justify-center items-center p-10">
+            <LoadingSpinner size="large" />
+          </div>
+        ) : (
+          <ResponsiveTable
+            data={filteredEmployees}
+            keyExtractor={(employee) => employee.id}
+            columns={[
+              {
+                id: 'name',
+                header: 'Name',
+                accessor: (employee) => (
+                  <div>
+                    <div className="font-medium text-gray-900">{employee.firstName} {employee.lastName}</div>
+                    <div className="text-sm text-gray-500">{employee.email}</div>
+                  </div>
+                )
+              },
+              {
+                id: 'position',
+                header: 'Position',
+                accessor: (employee) => <span>{employee.position}</span>,
+                hideOnMobile: true
+              },
+              {
+                id: 'department',
+                header: 'Department',
+                accessor: (employee) => <span>{employee.department}</span>,
+                hideOnMobile: true
+              },
+              {
+                id: 'actions',
+                header: 'Actions',
+                accessor: (employee) => (
+                  <div className="flex space-x-2">
+                    <button 
+                      onClick={() => onViewEmployee(employee.id)}
+                      className="px-3 py-1 text-sm bg-blue-600 text-white rounded"
+                    >
+                      View
+                    </button>
+                    <button 
+                      onClick={() => handleDeleteEmployee(employee.id, `${employee.firstName} ${employee.lastName}`)}
+                      className="px-3 py-1 text-sm bg-red-600 text-white rounded"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                )
+              }
+            ]}
+            emptyMessage="No employees found matching your search."
+            isLoading={false}
+          />
+        )}
+      </div>
+
+      {/* Confirmation Modal for Delete */}
+      <ConfirmationModal
+        isOpen={deleteConfirmation.isOpen}
+        title="Delete Employee"
+        message={`Are you sure you want to delete employee ${deleteConfirmation.employeeName}? This action cannot be undone.`}
+        confirmText="Delete"
+        cancelText="Cancel"
+        onConfirm={confirmDeleteEmployee}
+        onClose={() => setDeleteConfirmation({isOpen: false, employeeId: '', employeeName: ''})}
+        isLoading={isDeleting}
+      />
+
+      {/* TODO: Add Employee Modal component would go here */}
+    </>
+  );
+};
+
+export default EmployeeList;

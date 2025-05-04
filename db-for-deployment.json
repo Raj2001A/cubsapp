@@ -1,0 +1,128 @@
+{
+  "employees": [
+    {
+      "id": "1",
+      "employee_id": "EMP001",
+      "name": "John Doe",
+      "trade": "Engineer",
+      "nationality": "USA",
+      "join_date": "2023-01-15",
+      "date_of_birth": "1985-05-20",
+      "mobile_number": "+1234567890",
+      "home_phone_number": "+1987654321",
+      "email": "john.doe@example.com",
+      "company_id": "1",
+      "company_name": "Cub Technical Services",
+      "visa_expiry_date": "2025-01-15"
+    },
+    {
+      "id": "2",
+      "employee_id": "EMP002",
+      "name": "Jane Smith",
+      "trade": "Project Manager",
+      "nationality": "UK",
+      "join_date": "2023-02-10",
+      "date_of_birth": "1990-08-15",
+      "mobile_number": "+1234567891",
+      "home_phone_number": "+1987654322",
+      "email": "jane.smith@example.com",
+      "company_id": "1",
+      "company_name": "Cub Technical Services",
+      "visa_expiry_date": "2025-02-10"
+    },
+    {
+      "id": "3",
+      "employee_id": "EMP003",
+      "name": "Ahmed Hassan",
+      "trade": "Electrician",
+      "nationality": "Egypt",
+      "join_date": "2023-03-05",
+      "date_of_birth": "1988-11-12",
+      "mobile_number": "+1234567892",
+      "home_phone_number": "+1987654323",
+      "email": "ahmed.hassan@example.com",
+      "company_id": "2",
+      "company_name": "Cub Technical Contracting",
+      "visa_expiry_date": "2023-12-31"
+    }
+  ],
+  "companies": [
+    {
+      "id": "1",
+      "name": "Cub Technical Services",
+      "location": "Dubai, UAE",
+      "contact_email": "info@cubstechnical.com",
+      "contact_phone": "+971501234567"
+    },
+    {
+      "id": "2",
+      "name": "Cub Technical Contracting",
+      "location": "Abu Dhabi, UAE",
+      "contact_email": "contracts@cubstechnical.com",
+      "contact_phone": "+971502345678"
+    },
+    {
+      "id": "3",
+      "name": "Cub Technical Maintenance",
+      "location": "Sharjah, UAE",
+      "contact_email": "maintenance@cubstechnical.com",
+      "contact_phone": "+971503456789"
+    }
+  ],
+  "documents": [
+    {
+      "id": "1",
+      "employee_id": "1",
+      "document_type": "Passport",
+      "file_name": "john_doe_passport.pdf",
+      "file_path": "/documents/john_doe_passport.pdf",
+      "upload_date": "2023-01-20",
+      "expiry_date": null
+    },
+    {
+      "id": "2",
+      "employee_id": "1",
+      "document_type": "Visa",
+      "file_name": "john_doe_visa.pdf",
+      "file_path": "/documents/john_doe_visa.pdf",
+      "upload_date": "2023-01-20",
+      "expiry_date": "2025-01-15"
+    },
+    {
+      "id": "3",
+      "employee_id": "2",
+      "document_type": "Passport",
+      "file_name": "jane_smith_passport.pdf",
+      "file_path": "/documents/jane_smith_passport.pdf",
+      "upload_date": "2023-02-15",
+      "expiry_date": null
+    },
+    {
+      "id": "4",
+      "employee_id": "2",
+      "document_type": "Visa",
+      "file_name": "jane_smith_visa.pdf",
+      "file_path": "/documents/jane_smith_visa.pdf",
+      "upload_date": "2023-02-15",
+      "expiry_date": "2025-02-10"
+    },
+    {
+      "id": "5",
+      "employee_id": "3",
+      "document_type": "Passport",
+      "file_name": "ahmed_hassan_passport.pdf",
+      "file_path": "/documents/ahmed_hassan_passport.pdf",
+      "upload_date": "2023-03-10",
+      "expiry_date": null
+    },
+    {
+      "id": "6",
+      "employee_id": "3",
+      "document_type": "Visa",
+      "file_name": "ahmed_hassan_visa.pdf",
+      "file_path": "/documents/ahmed_hassan_visa.pdf",
+      "upload_date": "2023-03-10",
+      "expiry_date": "2023-12-31"
+    }
+  ]
+}

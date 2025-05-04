@@ -1,0 +1,44 @@
+/**
+ * API Service for connecting to the backend
+ */
+import { retryOperation, isOffline, checkApiAvailability } from '../utils/errorHandling';
+import logger from '../utils/logger';
+import { getOrFetchData } from '../utils/cacheUtils';
+import requestQueueManager, { RequestPriority } from '../utils/requestQueueManager';
+
+// Only keep these imports for config and mock backend
+import { API_ENDPOINT, USE_MOCK_BACKEND } from '../config';
+import { mockBackendService } from './mockBackendService';
+
+// API base URL from config
+const API_BASE_URL = API_ENDPOINT;
+
+// Default headers for API requests
+const defaultHeaders = {
+  'Content-Type': 'application/json',
+};
+
+// Timeout for API requests (in milliseconds)
+const API_TIMEOUT = 15000; // 15 seconds - reduced from 30 seconds for better user experience
+
+// API concurrency limits
+const MAX_CONCURRENT_REQUESTS = 20; // Maximum concurrent requests
+const MAX_CONCURRENT_REQUESTS_PER_ENDPOINT = 5; // Maximum concurrent requests per endpoint
+
+// Track concurrent requests
+const concurrentRequests = new Map<string, number>();
+const totalConcurrentRequests = { count: 0 };
+
+// Track request start times for timeout detection
+const requestStartTimes = new Map<string, number>();
+
+// Helper function for handling API responses
+export type ApiResponseWithMessage = { message?: string };
+
+// The rest of your file will be added in the next step
+// For now, we're just removing duplicate imports and the broken ternary
+
+// Export placeholders (will be properly implemented in the next step)
+export { fetchWithTimeout, safeHandleResponse };
+export const api = {}; // Temporary placeholder
+export default api;

@@ -1,0 +1,36 @@
+{
+  "employees": [
+    {
+      "id": "1",
+      "firebase_uid": "mock-uid-1",
+      "name": "Alice Smith",
+      "email": "alice@example.com",
+      "department": "HR",
+      "position": "Manager",
+      "visaExpiryDate": "2025-12-01",
+      "documents": [
+        { "id": "doc1", "name": "Passport.pdf", "url": "/mock/docs/passport-alice.pdf" }
+      ]
+    },
+    {
+      "id": "2",
+      "firebase_uid": "mock-uid-2",
+      "name": "Bob Lee",
+      "email": "bob@example.com",
+      "department": "IT",
+      "position": "Developer",
+      "visaExpiryDate": "2024-10-15",
+      "documents": [
+        { "id": "doc2", "name": "Visa.pdf", "url": "/mock/docs/visa-bob.pdf" }
+      ]
+    }
+  ],
+  "documents": [
+    { "id": "doc1", "employeeId": "1", "name": "Passport.pdf", "url": "/mock/docs/passport-alice.pdf" },
+    { "id": "doc2", "employeeId": "2", "name": "Visa.pdf", "url": "/mock/docs/visa-bob.pdf" }
+  ],
+  "visaExpiries": [
+    { "employeeId": "1", "name": "Alice Smith", "expiry": "2025-12-01" },
+    { "employeeId": "2", "name": "Bob Lee", "expiry": "2024-10-15" }
+  ]
+}

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="32px" height="32px" viewBox="0 0 32 32" version="1.1" xmlns="http://www.w3.org/2000/svg">
+    <title>Employee Management System</title>
+    <g stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <rect fill="#00796B" x="0" y="0" width="32" height="32" rx="4"></rect>
+        <path d="M16,8 C18.2091,8 20,9.79086 20,12 C20,14.2091 18.2091,16 16,16 C13.7909,16 12,14.2091 12,12 C12,9.79086 13.7909,8 16,8 Z M16,18 C20.4183,18 24,19.7909 24,22 L24,24 L8,24 L8,22 C8,19.7909 11.5817,18 16,18 Z" fill="#FFFFFF" fill-rule="nonzero"></path>
+    </g>
+</svg>
