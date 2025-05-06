@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Eye, EyeOff } from 'lucide-react';
+import GoogleSignInButton from '../components/GoogleSignInButton';
 
 export const Login = () => {
   const navigate = useNavigate();
@@ -52,6 +53,7 @@ export const Login = () => {
                 <div className="text-sm text-red-700">{error}</div>
               </div>
             )}
+            <GoogleSignInButton />
             <div className="rounded-md -space-y-px">
               <div className="mb-4">
                 <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">

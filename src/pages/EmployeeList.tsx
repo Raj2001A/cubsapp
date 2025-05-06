@@ -4,6 +4,7 @@ import { useEmployees } from '../context/EmployeeContext';
 import { useUI } from '../context/UIContext';
 import { Employee } from '../types/employees';
 import { Trash2, Eye, Search, Loader2, UserPlus, Download, ArrowUpDown } from 'lucide-react';
+import { apiService } from '../services/apiService'; // Import apiService
 
 interface EmployeeListProps {
   onViewEmployee?: (employeeId: string) => void;
@@ -28,6 +29,39 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({
   const [isSearching, setIsSearching] = useState(false);
   const [sortField, setSortField] = useState<keyof Employee>('name');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [isDeleting, setIsDeleting] = useState(false); // Add isDeleting state
+  const [selectedEmployeeIds, setSelectedEmployeeIds] = useState<string[]>([]);
+  const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false); // Add local loading state for bulk delete
+
+  const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.checked) {
+      setSelectedEmployeeIds(filteredEmployees.map(emp => emp.id));
+    } else {
+      setSelectedEmployeeIds([]);
+    }
+  };
+
+  const handleSelectOne = (id: string) => {
+    setSelectedEmployeeIds(prev =>
+      prev.includes(id) ? prev.filter(eid => eid !== id) : [...prev, id]
+    );
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedEmployeeIds.length === 0) return;
+    if (!window.confirm(`Delete ${selectedEmployeeIds.length} selected employees?`)) return;
+    setBulkDeleteLoading(true);
+    try {
+      await Promise.all(selectedEmployeeIds.map(id => apiService.delete(`/employees/${id}`)));
+      setFilteredEmployees(prev => prev.filter(emp => !selectedEmployeeIds.includes(emp.id)));
+      setSelectedEmployeeIds([]);
+      showToast(`${selectedEmployeeIds.length} employees deleted successfully`, 'success');
+    } catch {
+      showToast('Failed to delete some employees', 'error');
+    } finally {
+      setBulkDeleteLoading(false);
+    }
+  };
 
   useEffect(() => {
     const loadEmployees = async () => {
@@ -65,16 +99,23 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({
     }
   };
 
+  // Delete employee functionality
   const handleDelete = async (id: string, name: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (window.confirm(`Are you sure you want to delete ${name}?`)) {
-      try {
-        await deleteEmployee(id);
-        showToast(`Employee ${name} deleted successfully`, 'success');
-      } catch (error) {
-        console.error("Error deleting employee:", error);
-        showToast(`Failed to delete ${name}`, 'error');
+    if (!window.confirm(`Are you sure you want to delete employee '${name}'?`)) return;
+    setIsDeleting(true); // Set isDeleting to true
+    try {
+      const response = await apiService.delete(`/employees/${id}`);
+      if (response.status === 200) {
+        setFilteredEmployees((prev) => prev.filter(emp => emp.id !== id));
+        showToast('Employee deleted successfully', 'success');
+      } else {
+        showToast(response.message || 'Failed to delete employee', 'error');
       }
+    } catch (error) {
+      showToast('Error deleting employee', 'error');
+    } finally {
+      setIsDeleting(false); // Set isDeleting to false
     }
   };
 
@@ -112,9 +153,9 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({
     try {
       const csvContent = 
         "data:text/csv;charset=utf-8," + 
-        "ID,Name,Position,Department,Email,Phone\n" +
+        "ID,Name,Position,Company,Email,Phone\n" +
         filteredEmployees.map(emp => 
-          `${emp.id},"${emp.name}","${emp.position || ''}","${emp.department || ''}","${emp.email || ''}","${emp.phone || ''}"`
+          `${emp.id},"${emp.name}","${emp.position || ''}","${emp.company || ''}","${emp.email || ''}","${emp.phone || ''}"`
         ).join("\n");
       
       const encodedUri = encodeURI(csvContent);
@@ -145,7 +186,7 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({
           <h1 className="text-2xl font-bold text-gray-800">Employee Management</h1>
           <div className="flex gap-2 flex-wrap">
             <button
-              onClick={() => navigate('/employee/new')}
+              onClick={() => navigate('/employee-add')}
               className="flex items-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
             >
               <UserPlus className="w-4 h-4 mr-2" />
@@ -166,7 +207,7 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({
             <div className="relative flex-grow">
               <input
                 type="text"
-                placeholder="Search employees by name, ID, or department..."
+                placeholder="Search employees by name, ID, or company..."
                 className="w-full px-4 py-2 pl-10 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -187,10 +228,22 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({
           </form>
         </div>
 
-        {isLoading ? (
+        {selectedEmployeeIds.length > 0 && (
+          <div className="mb-4 flex justify-end" role="region" aria-live="polite">
+            <button
+              onClick={handleBulkDelete}
+              className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+              aria-label="Delete selected employees"
+              disabled={bulkDeleteLoading}
+            >
+              {bulkDeleteLoading ? 'Deleting...' : `Delete Selected (${selectedEmployeeIds.length})`}
+            </button>
+          </div>
+        )}
+        {isLoading || isDeleting ? (
           <div className="flex justify-center items-center h-64">
             <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
-            <span className="ml-2 text-gray-600">Loading employees...</span>
+            <span className="ml-2 text-gray-600">Loading...</span>
           </div>
         ) : filteredEmployees.length === 0 ? (
           <div className="bg-gray-50 rounded-lg p-8 text-center">
@@ -204,90 +257,59 @@ export const EmployeeList: React.FC<EmployeeListProps> = ({
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200 shadow-sm rounded-lg overflow-hidden">
+            <table className="min-w-full divide-y divide-gray-200 shadow-sm rounded-lg overflow-hidden text-sm align-middle">
               <thead className="bg-gray-50">
                 <tr>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    <button 
-                      className="flex items-center space-x-1 text-left focus:outline-none" 
-                      onClick={() => handleSort('name')}
-                    >
-                      <span>Name</span>
-                      <ArrowUpDown className={`w-4 h-4 ${sortField === 'name' ? 'text-blue-600' : 'text-gray-400'}`} />
-                    </button>
+                  <th className="px-4 py-3 text-left font-semibold tracking-wider whitespace-nowrap">
+                    <input
+                      type="checkbox"
+                      checked={selectedEmployeeIds.length === filteredEmployees.length && filteredEmployees.length > 0}
+                      onChange={handleSelectAll}
+                      aria-label="Select all employees"
+                      tabIndex={0}
+                    />
                   </th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    <button 
-                      className="flex items-center space-x-1 text-left focus:outline-none" 
-                      onClick={() => handleSort('position')}
-                    >
-                      <span>Position</span>
-                      <ArrowUpDown className={`w-4 h-4 ${sortField === 'position' ? 'text-blue-600' : 'text-gray-400'}`} />
-                    </button>
-                  </th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    <button 
-                      className="flex items-center space-x-1 text-left focus:outline-none" 
-                      onClick={() => handleSort('department')}
-                    >
-                      <span>Department</span>
-                      <ArrowUpDown className={`w-4 h-4 ${sortField === 'department' ? 'text-blue-600' : 'text-gray-400'}`} />
-                    </button>
-                  </th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    <span>Contact</span>
-                  </th>
-                  <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Actions
-                  </th>
+                  <th className="px-4 py-3 text-left font-semibold tracking-wider whitespace-nowrap">Emp. ID</th>
+                  <th className="px-4 py-3 text-left font-semibold tracking-wider whitespace-nowrap">Name</th>
+                  <th className="px-4 py-3 text-left font-semibold tracking-wider whitespace-nowrap">Company</th>
+                  <th className="px-4 py-3 text-left font-semibold tracking-wider whitespace-nowrap">Position</th>
+                  <th className="px-4 py-3 text-left font-semibold tracking-wider whitespace-nowrap">Nationality</th>
+                  <th className="px-4 py-3 text-left font-semibold tracking-wider whitespace-nowrap">Date of Birth</th>
+                  <th className="px-4 py-3 text-left font-semibold tracking-wider whitespace-nowrap">Join Date</th>
+                  <th className="px-4 py-3 text-left font-semibold tracking-wider whitespace-nowrap">Visa Status</th>
+                  <th className="px-4 py-3 text-left font-semibold tracking-wider whitespace-nowrap">Visa Expiry</th>
+                  <th className="px-4 py-3 text-left font-semibold tracking-wider whitespace-nowrap">Email</th>
+                  <th className="px-4 py-3 text-left font-semibold tracking-wider whitespace-nowrap">Phone</th>
+                  <th className="px-4 py-3 text-right font-semibold tracking-wider whitespace-nowrap">Actions</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {filteredEmployees.map((employee) => (
-                  <tr 
-                    key={employee.id} 
-                    className="hover:bg-gray-50 cursor-pointer transition-colors"
-                    onClick={() => handleViewDetails(employee.id)}
-                  >
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center">
-                        <div className="flex-shrink-0 h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold">
-                          {employee.name?.charAt(0) || '?'}
-                        </div>
-                        <div className="ml-4">
-                          <div className="text-sm font-medium text-gray-900">{employee.name}</div>
-                          <div className="text-sm text-gray-500">ID: {employee.id}</div>
-                        </div>
-                      </div>
+                  <tr key={employee.id} className="hover:bg-gray-50 cursor-pointer transition-colors">
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <input
+                        type="checkbox"
+                        checked={selectedEmployeeIds.includes(employee.id)}
+                        onChange={() => handleSelectOne(employee.id)}
+                        aria-label={`Select employee ${employee.name}`}
+                        tabIndex={0}
+                      />
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">{employee.position || 'Not specified'}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
-                        {employee.department || 'Not assigned'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      <div>{employee.email || 'No email'}</div>
-                      <div>{employee.phone || 'No phone'}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleViewDetails(employee.id);
-                        }}
-                        className="text-blue-600 hover:text-blue-900 mr-4"
-                      >
-                        <Eye className="w-5 h-5" />
-                      </button>
-                      <button 
-                        onClick={(e) => handleDelete(employee.id, employee.name || 'this employee', e)}
-                        className="text-red-600 hover:text-red-900"
-                      >
-                        <Trash2 className="w-5 h-5" />
-                      </button>
+                    <td className="px-4 py-3 whitespace-nowrap">{employee.employeeId || '-'}</td>
+                    <td className="px-4 py-3 whitespace-nowrap font-medium text-gray-900">{employee.name}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">{employee.company}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">{employee.position}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">{employee.nationality}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">{employee.dateOfBirth}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">{employee.joinDate}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">{employee.visaStatus}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">{employee.visaExpiryDate || '-'}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">{employee.email || '-'}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">{employee.phone || '-'}</td>
+                    <td className="px-4 py-3 whitespace-nowrap text-right">
+                      <button onClick={e => { e.stopPropagation(); handleViewDetails(employee.id); }} className="text-blue-600 hover:text-blue-900 mr-4" title="View"><Eye className="w-5 h-5" /></button>
+                      <button onClick={e => { e.stopPropagation(); navigate(`/employee-edit/${employee.id}`); }} className="text-yellow-600 hover:text-yellow-900 mr-4 focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500" title="Edit" aria-label={`Edit ${employee.name}`} tabIndex={0}><svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536M9 13l6.293-6.293a1 1 0 011.414 0l2.586 2.586a1 1 0 010 1.414L13 17H9v-4z" /></svg></button>
+                      <button onClick={e => { e.stopPropagation(); navigate(`/employee-delete/${employee.id}`); }} className="text-red-600 hover:text-red-900" title="Delete"><Trash2 className="w-5 h-5" /></button>
                     </td>
                   </tr>
                 ))}
