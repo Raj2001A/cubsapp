@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { useEmployeeDocuments } from '../hooks/useEmployeeDocuments';
 import { DocumentCategory } from '../types/documents';
 import { DocumentCard } from '../components/DocumentCard';
-import { Button } from '../components/ui/Button';
+import Button from '../components/ui/Button';
 import { Plus } from 'lucide-react';
 
 const DOCUMENT_CATEGORIES: DocumentCategory[] = [
@@ -22,6 +22,10 @@ export const EmployeeDocuments: React.FC<{ employeeId: string }> = ({ employeeId
     return <div className="animate-pulse p-4">Loading...</div>;
   }
 
+  const formatName = (str: string): string => {
+    return str.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())
+  }
+
   return (
     <div className="bg-white rounded-lg shadow p-6">
       <div className="flex justify-between items-center mb-6">
@@ -35,7 +39,7 @@ export const EmployeeDocuments: React.FC<{ employeeId: string }> = ({ employeeId
       <div className="space-y-6">
         {DOCUMENT_CATEGORIES.map((category) => (
           <div key={category}>
-            <h3 className="text-lg font-semibold mb-4">{category.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())}</h3>
+            <h3 className="text-lg font-semibold mb-4">{formatName(category)}</h3>
             <div className="overflow-x-auto">
               <div className="flex gap-4">
                 {documents?.filter(doc => doc.category === category).map((doc) => (

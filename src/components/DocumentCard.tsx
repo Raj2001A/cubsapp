@@ -1,6 +1,6 @@
 import React from 'react';
 import { Document } from '../hooks/useEmployeeDocuments';
-import { Button } from './ui/Button';
+import Button from './ui/Button';
 import { Pencil, Trash2 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -44,11 +44,11 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({
         )}
       </div>
       <div className="ml-4 flex-shrink-0 flex space-x-2">
-        <Button variant="outline" size="sm" onClick={onEdit}>
+        <Button variant="default" size="sm" onClick={onEdit}>
           <Pencil className="w-4 h-4 mr-1" />
           Edit
         </Button>
-        <Button variant="destructive" size="sm" onClick={onDelete}>
+        <Button variant="danger" size="sm" onClick={onDelete}>
           <Trash2 className="w-4 h-4 mr-1" />
           Delete
         </Button>

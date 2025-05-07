@@ -7,6 +7,9 @@ import { EmployeeNotifications } from './EmployeeNotifications';
 export const EmployeeRouter: React.FC = () => {
   const { id } = useParams();
 
+  // Provide a fallback if id is undefined
+  const employeeId = id || '';
+
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
@@ -22,9 +25,9 @@ export const EmployeeRouter: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <EmployeeDetails employeeId={id} />
-        <EmployeeDocuments employeeId={id} />
-        <EmployeeNotifications employeeId={id} />
+        <EmployeeDetails employeeId={employeeId} />
+        <EmployeeDocuments employeeId={employeeId} />
+        <EmployeeNotifications employeeId={employeeId} />
       </div>
     </div>
   );

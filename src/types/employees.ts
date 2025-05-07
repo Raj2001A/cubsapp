@@ -21,9 +21,9 @@ export type Employee = {
   id: string;
   employeeId: string;
   name: string;
+  company: string;
   companyId: string;
   companyName: string;
-  department: string;
   position: string;
   nationality: string;
   dateOfBirth: string;

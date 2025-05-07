@@ -20,6 +20,11 @@ import FallbackErrorPage from '@/components/FallbackErrorPage';
 import { EmployeeList } from '@/pages/EmployeeList';
 import { EmployeeDetails } from '@/pages/EmployeeDetails';
 
+// Lazy load components
+const EmployeeAdd = React.lazy(() => import('./pages/EmployeeAdd'));
+const EmployeeEdit = React.lazy(() => import('./pages/EmployeeEdit'));
+const EmployeeDelete = React.lazy(() => import('./pages/EmployeeDelete'));
+
 // Query client
 const queryClient = new QueryClient();
 
@@ -105,6 +110,60 @@ const AppRoutes = () => {
               onToggleSidebar={toggleSidebar}
             >
               <EmployeeDetails employeeId="placeholder" />
+            </AppContent>
+          ) : (
+            <Navigate to="/login" replace />
+          )
+        }
+      />
+      <Route
+        path="/employee-add"
+        element={
+          isAuthenticated ? (
+            <AppContent
+              isAuthenticated={isAuthenticated}
+              user={user || fallbackUser}
+              onToggleSidebar={toggleSidebar}
+            >
+              <Suspense fallback={<div>Loading...</div>}>
+                <EmployeeAdd />
+              </Suspense>
+            </AppContent>
+          ) : (
+            <Navigate to="/login" replace />
+          )
+        }
+      />
+      <Route
+        path="/employee-delete/:id"
+        element={
+          isAuthenticated ? (
+            <AppContent
+              isAuthenticated={isAuthenticated}
+              user={user || fallbackUser}
+              onToggleSidebar={toggleSidebar}
+            >
+              <Suspense fallback={<div>Loading...</div>}>
+                <EmployeeDelete />
+              </Suspense>
+            </AppContent>
+          ) : (
+            <Navigate to="/login" replace />
+          )
+        }
+      />
+      <Route
+        path="/employee-edit/:id"
+        element={
+          isAuthenticated ? (
+            <AppContent
+              isAuthenticated={isAuthenticated}
+              user={user || fallbackUser}
+              onToggleSidebar={toggleSidebar}
+            >
+              <Suspense fallback={<div>Loading...</div>}>
+                <EmployeeEdit />
+              </Suspense>
             </AppContent>
           ) : (
             <Navigate to="/login" replace />

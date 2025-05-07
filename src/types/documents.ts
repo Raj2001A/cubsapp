@@ -14,6 +14,9 @@ export type {
   EXPIRY_TRACKED_DOCUMENTS
 } from './document';
 
+// Add DocumentCategory type
+export type DocumentCategory = 'passport' | 'visa' | 'emiratesId' | 'workPermit' | 'medical' | 'other';
+
 export {
   getDocumentTypeLabel,
   getDaysUntilExpiry,

@@ -2,7 +2,7 @@ import React from 'react';
 import { useParams } from 'react-router-dom';
 import { useEmployeeNotifications } from '../hooks/useEmployeeNotifications';
 import { NotificationCard } from '../components/NotificationCard';
-import { Button } from '../components/ui/Button';
+import Button from '../components/ui/Button';
 import { Bell } from 'lucide-react';
 
 export const EmployeeNotifications: React.FC<{ employeeId: string }> = ({ employeeId }) => {
