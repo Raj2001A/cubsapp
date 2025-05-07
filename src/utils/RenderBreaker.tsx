@@ -1,89 +1,116 @@
-import React, { useState, useEffect, useRef, ReactNode } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 /**
- * A component that prevents infinite rendering loops in React applications.
- * This component keeps track of render count and forces a stable state after a threshold.
+ * RenderBreaker is a protective component that will detect and stop infinite render cycles
+ * It helps debug React performance issues and prevents browser hangs
  */
 interface RenderBreakerProps {
-  children: ReactNode;
-  maxRenders?: number;
+  children: React.ReactNode;
+  threshold?: number;
+  timeWindow?: number;
+  onBreak?: (rendered: number, timeMs: number) => void;
 }
 
-const RenderBreaker: React.FC<RenderBreakerProps> = ({ 
-  children, 
-  maxRenders = 25 // Maximum number of renders allowed before breaking the cycle
-}) => {
-  const [renderCount, setRenderCount] = useState(0);
-  const [hasReachedMax, setHasReachedMax] = useState(false);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const mountTimeRef = useRef<number>(Date.now());
-  const lastRenderTimeRef = useRef<number>(Date.now());
+export default function RenderBreaker({
+  children,
+  threshold = 200, // Increased from default 100 to be more generous
+  timeWindow = 5000, // Increased from default 3000ms to allow for slower devices
+  onBreak
+}: RenderBreakerProps) {
+  const [broken, setBroken] = useState(false);
+  const [fallbackMessage, setFallbackMessage] = useState<string | null>(null);
+  const renderCount = useRef(0);
+  const firstRenderTime = useRef(Date.now());
+  const isFirstRender = useRef(true);
+  const initialDataLoading = useRef(true);
+  const initialLoadTimeout = useRef<number | null>(null);
 
-  // Track render frequency
-  const renderFrequencyRef = useRef<number[]>([]);
-  
-  // Cleanup on unmount
+  // Allow more renders during initial data loading (first 5 seconds)
   useEffect(() => {
+    initialLoadTimeout.current = window.setTimeout(() => {
+      initialDataLoading.current = false;
+    }, 5000);
+
     return () => {
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
+      if (initialLoadTimeout.current) {
+        clearTimeout(initialLoadTimeout.current);
       }
     };
   }, []);
 
   useEffect(() => {
-    // Calculate time since last render
-    const now = Date.now();
-    const timeSinceLastRender = now - lastRenderTimeRef.current;
-    lastRenderTimeRef.current = now;
-    
-    // Track render frequency (last 5 renders)
-    renderFrequencyRef.current = [
-      timeSinceLastRender,
-      ...renderFrequencyRef.current.slice(0, 4)
-    ];
-    
-    // Calculate average render frequency if we have enough data
-    const avgRenderFrequency = renderFrequencyRef.current.length >= 3 
-      ? renderFrequencyRef.current.reduce((sum, time) => sum + time, 0) / renderFrequencyRef.current.length
-      : 0;
-    
-    // Detect rapid renders (less than 50ms between renders on average)
-    const isRapidRender = avgRenderFrequency > 0 && avgRenderFrequency < 50;
-    
-    // Only increment if we haven't reached max yet
-    if (renderCount < maxRenders && !hasReachedMax) {
-      // Use a timeout to avoid immediate state updates
-      // Clear previous timeout to avoid multiple increments
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
-      
-      // Use a longer timeout for rapid renders to slow down the cycle
-      const timeoutDuration = isRapidRender ? 100 : 0;
-      
-      timeoutRef.current = setTimeout(() => {
-        setRenderCount(prev => prev + 1);
-        timeoutRef.current = null;
-      }, timeoutDuration);
-      
-      return () => {
-        if (timeoutRef.current) {
-          clearTimeout(timeoutRef.current);
-          timeoutRef.current = null;
-        }
-      };
-    } else if (renderCount >= maxRenders && !hasReachedMax) {
-      setHasReachedMax(true);
-      console.warn(
-        `RenderBreaker: Breaking potential infinite render cycle after ${maxRenders} renders in ${(Date.now() - mountTimeRef.current) / 1000}s. ` +
-        'This is a protective measure and may indicate an issue in your component state management. ' +
-        'Average time between renders: ' + (avgRenderFrequency.toFixed(2)) + 'ms'
-      );
+    // Skip first render (this is the initial mount)
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
     }
-  }, [renderCount, maxRenders, hasReachedMax]);
 
+    renderCount.current++;
+    const now = Date.now();
+    const elapsed = now - firstRenderTime.current;
+
+    // Use a higher threshold during initial data loading
+    const effectiveThreshold = initialDataLoading.current ? threshold * 2 : threshold;
+
+    // Break if we exceed the threshold within the time window
+    if (renderCount.current > effectiveThreshold && elapsed < timeWindow) {
+      // Calculate average time between renders
+      const avgRenderTime = elapsed / renderCount.current;
+
+      const message = `Breaking potential infinite render cycle after ${renderCount.current} renders in ${(elapsed / 1000).toFixed(2)}s. This is a protective measure and may indicate an issue in your component state management. Average time between renders: ${avgRenderTime.toFixed(2)}ms`;
+      console.warn(message);
+      setBroken(true);
+      setFallbackMessage(message);
+
+      if (onBreak) {
+        onBreak(renderCount.current, elapsed);
+      }
+    }
+
+    // Reset counter if we've gone past the time window
+    if (elapsed > timeWindow) {
+      renderCount.current = 0;
+      firstRenderTime.current = now;
+    }
+  });
+
+  // Provide a fallback UI when broken
+  if (broken) {
+    return (
+      <div style={{
+        margin: '20px',
+        padding: '20px',
+        border: '2px solid #f00',
+        borderRadius: '5px',
+        backgroundColor: '#fff0f0',
+        color: '#500'
+      }}>
+        <h3>Too many renders detected</h3>
+        <p>{fallbackMessage}</p>
+        <p>This may be caused by:</p>
+        <ul>
+          <li>State update inside a render function</li>
+          <li>Missing dependency arrays in hooks</li>
+          <li>Mutating state objects directly</li>
+          <li>Props changing too frequently</li>
+        </ul>
+        <button
+          onClick={() => setBroken(false)}
+          style={{
+            padding: '8px 16px',
+            backgroundColor: '#4a90e2',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: 'pointer'
+          }}
+        >
+          Reset and try again
+        </button>
+      </div>
+    );
+  }
+
+  // Normal rendering
   return <>{children}</>;
-};
-
-export default RenderBreaker;
+}

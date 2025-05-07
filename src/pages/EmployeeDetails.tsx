@@ -81,6 +81,14 @@ export const EmployeeDetails: React.FC = () => {
       return;
     }
 
+    if (retryCount > maxRetries) {
+      console.log(`Max retries (${maxRetries}) reached for employee ${id}, using fallback`);
+      setUseFallback(true);
+      setEmployee(createFallbackEmployee(id));
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
@@ -132,7 +140,17 @@ export const EmployeeDetails: React.FC = () => {
 
       // Fallback to API
       try {
-        const response = await apiService.get(`/employees/${id}`);
+        // Wrap in a timeout to avoid hanging the UI
+        const apiPromise = apiService.get(`/employees/${id}`);
+        
+        // Create a timeout promise
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('API request timed out')), 5000);
+        });
+        
+        // Race the API request against the timeout
+        const response = await Promise.race([apiPromise, timeoutPromise]) as any;
+        
         if (response && response.data) {
           const mappedEmployee = {
             id: response.data.employee_id || response.data.id || id,
@@ -208,10 +226,11 @@ export const EmployeeDetails: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [id, retryCount, maxRetries, useFallback]);
+  }, [id, maxRetries]); // Only depend on id and maxRetries, not retryCount or useFallback
 
   // Fix for infinite renders - only fetch on mount or when id/retryCount changes
   useEffect(() => {
+    console.log(`Fetching employee details for ID: ${id}`);
     if (id) {
       fetchEmployeeDetails();
     }
