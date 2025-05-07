@@ -7,6 +7,26 @@
 
 import { getEnv } from '../utils/env';
 
+// Browser-safe base64 encoding function (replacement for btoa)
+function safeEncode(str: string): string {
+  try {
+    return btoa(str);
+  } catch (e) {
+    // Fallback implementation if btoa is not available
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+    let output = '';
+    for (
+      let block = 0, charCode, i = 0, map = chars;
+      str.charAt(i | 0) || (map = '=', i % 1);
+      output += map.charAt(63 & block >> 8 - i % 1 * 8)
+    ) {
+      charCode = str.charCodeAt(i += 3/4);
+      block = block << 8 | charCode;
+    }
+    return output;
+  }
+}
+
 // File storage interface
 interface StoredFile {
   content: string;
@@ -17,7 +37,7 @@ interface StoredFile {
 
 class B2Service {
   private STORAGE_KEY = 'b2_files';
-  private AUTH_STORAGE_KEY = 'b2_auth';
+  private AUTH_STORAGE_KEY = 'b2_auth_data'; // Ensure consistent key name
   private bucketName: string;
   private keyId: string;
   private keyName: string;
@@ -29,37 +49,57 @@ class B2Service {
   private corsAllowedOrigins: string[] = ['*']; // Allow all origins by default
   
   constructor() {
-    // Read configuration from environment
-    this.keyId = getEnv('VITE_B2_KEY_ID', '003de195e9b8c4d0000000002');
-    this.keyName = getEnv('VITE_B2_KEY_NAME', 'VisaAppKey');
-    this.bucketName = getEnv('VITE_B2_BUCKET_NAME', 'VisaDocsEU');
-    this.useMock = getEnv('VITE_B2_USE_MOCK', 'true') === 'true';
-    
-    // Check if we should use mock mode
-    if (this.useMock) {
-      console.log('B2Service running in mock mode - using localStorage for storage');
-    } else {
-      console.log('B2Service running in real mode - using Backblaze B2 API');
-      
-      // Try to get the current origin for CORS settings
-      try {
-        if (typeof window !== 'undefined') {
-          const origin = window.location.origin;
-          this.corsAllowedOrigins = [origin, 'http://localhost:3000', 'http://localhost:5000', 'http://127.0.0.1:3000'];
-          console.log('B2Service will use the following CORS allowed origins:', this.corsAllowedOrigins);
-        }
-      } catch (e) {
-        console.warn('Failed to determine origin for CORS settings', e);
-      }
-    }
-    
-    // Initialize the localStorage storage if it doesn't exist
-    if (!localStorage.getItem(this.STORAGE_KEY)) {
-      localStorage.setItem(this.STORAGE_KEY, JSON.stringify({}));
-    }
-    
-    // Try to load cached auth
     try {
+      // Read configuration from environment
+      this.keyId = getEnv('VITE_B2_KEY_ID', '003de195e9b8c4d0000000002');
+      this.keyName = getEnv('VITE_B2_KEY_NAME', 'VisaAppKey');
+      this.bucketName = getEnv('VITE_B2_BUCKET_NAME', 'VisaDocsEU');
+      this.useMock = getEnv('VITE_B2_USE_MOCK', 'true') === 'true';
+      
+      // Check if we should use mock mode
+      if (this.useMock) {
+        console.log('B2Service running in mock mode - using localStorage for storage');
+      } else {
+        // Validate B2 credentials
+        if (!this.keyId || !this.keyName || !this.bucketName) {
+          console.warn('B2 credentials not properly configured');
+          this.useMock = true; // Fall back to mock mode if credentials missing
+        } else {
+          console.log('B2Service running in real mode - using Backblaze B2 API');
+        }
+        
+        // Try to get the current origin for CORS settings
+        try {
+          if (typeof window !== 'undefined') {
+            const origin = window.location.origin;
+            this.corsAllowedOrigins = [origin, 'http://localhost:3000', 'http://localhost:5000', 'http://127.0.0.1:3000'];
+            console.log('B2Service will use the following CORS allowed origins:', this.corsAllowedOrigins);
+          }
+        } catch (e) {
+          console.warn('Failed to determine origin for CORS settings', e);
+        }
+      }
+      
+      // Initialize the localStorage storage if it doesn't exist
+      if (typeof localStorage !== 'undefined' && !localStorage.getItem(this.STORAGE_KEY)) {
+        localStorage.setItem(this.STORAGE_KEY, JSON.stringify({}));
+      }
+      
+      // Try to load cached auth
+      this.loadCachedAuth();
+    } catch (err) {
+      console.error('Failed to initialize B2 service:', err);
+      this.useMock = true; // Fall back to mock mode on initialization failure
+    }
+  }
+
+  /**
+   * Load cached authorization data from localStorage
+   */
+  private loadCachedAuth(): void {
+    try {
+      if (typeof localStorage === 'undefined') return;
+      
       const cachedAuth = localStorage.getItem(this.AUTH_STORAGE_KEY);
       if (cachedAuth) {
         const parsed = JSON.parse(cachedAuth);
@@ -88,7 +128,7 @@ class B2Service {
     
     try {
       // We need to be authorized first
-      const isAuthorized = await this.authorize();
+      const isAuthorized = await this.ensureAuthorized();
       if (!isAuthorized) {
         console.warn('Failed to authorize with B2 for CORS check');
         return false;
@@ -151,6 +191,24 @@ class B2Service {
   }
 
   /**
+   * Ensure we're authorized with B2
+   */
+  private async ensureAuthorized(): Promise<boolean> {
+    // If we're in mock mode, we're always authorized
+    if (this.useMock) {
+      return true;
+    }
+    
+    // If we already have a valid auth token, we're authorized
+    if (this.authToken && this.apiUrl && this.downloadUrl) {
+      return true;
+    }
+    
+    // Otherwise, we need to authorize
+    return this.authorize();
+  }
+
+  /**
    * Authorize with B2 to get API URLs and auth token
    */
   private async authorize(): Promise<boolean> {
@@ -164,11 +222,6 @@ class B2Service {
       return true;
     }
     
-    // If we already have a valid auth token, use it
-    if (this.authToken && this.apiUrl && this.downloadUrl) {
-      return true;
-    }
-    
     // Create a new authorization promise
     this.authorizationPromise = new Promise<boolean>(async (resolve) => {
       let retryCount = 0;
@@ -176,8 +229,8 @@ class B2Service {
       
       while (retryCount < maxRetries) {
         try {
-          // Encode credentials for Basic Auth
-          const credentials = btoa(`${this.keyId}:${this.keyName}`);
+          // Encode credentials for Basic Auth - use the safe encoding function
+          const credentials = safeEncode(`${this.keyId}:${this.keyName}`);
           
           // Make the authorization request
           const response = await fetch('https://api.backblazeb2.com/b2api/v2/b2_authorize_account', {
@@ -204,6 +257,7 @@ class B2Service {
               continue;
             }
             
+            this.authorizationPromise = null;
             resolve(false);
             return;
           }
@@ -218,17 +272,21 @@ class B2Service {
           // Cache auth data
           const expiresAt = new Date();
           expiresAt.setHours(expiresAt.getHours() + 23);
-          localStorage.setItem('b2_auth_data', JSON.stringify({
-            authToken: this.authToken,
-            apiUrl: this.apiUrl,
-            downloadUrl: this.downloadUrl,
-            expiresAt: expiresAt.toISOString()
-          }));
           
+          if (typeof localStorage !== 'undefined') {
+            localStorage.setItem(this.AUTH_STORAGE_KEY, JSON.stringify({
+              authToken: this.authToken,
+              apiUrl: this.apiUrl,
+              downloadUrl: this.downloadUrl,
+              expiresAt: expiresAt.toISOString()
+            }));
+          }
+          
+          this.authorizationPromise = null;
           resolve(true);
           return;
         } catch (error) {
-          console.error('Unexpected error during B2 authorization:', error);
+          console.error('B2 authorization failed:', error);
           
           if (retryCount < maxRetries - 1) {
             retryCount++;
@@ -237,11 +295,13 @@ class B2Service {
             continue;
           }
           
+          this.authorizationPromise = null;
           resolve(false);
           return;
         }
       }
       
+      this.authorizationPromise = null;
       resolve(false);
     });
     
@@ -323,7 +383,7 @@ class B2Service {
     try {
       // Authorize with B2
       console.log(`Uploading file to B2: ${fileName}`);
-      const isAuthorized = await this.authorize();
+      const isAuthorized = await this.ensureAuthorized();
       if (!isAuthorized) {
         console.warn('Failed to authorize with B2, using localStorage fallback');
         return `error:auth_failed`;
@@ -359,7 +419,7 @@ class B2Service {
       } else if (data.startsWith('data:')) {
         // For data URIs, extract the base64 data
         const base64Data = data.split(',')[1];
-        const binaryString = atob(base64Data);
+        const binaryString = window.atob(base64Data);
         const bytes = new Uint8Array(binaryString.length);
         for (let i = 0; i < binaryString.length; i++) {
           bytes[i] = binaryString.charCodeAt(i);
@@ -368,7 +428,7 @@ class B2Service {
       } else {
         // Assume it's already base64 encoded
         try {
-          const binaryString = atob(data);
+          const binaryString = window.atob(data);
           const bytes = new Uint8Array(binaryString.length);
           for (let i = 0; i < binaryString.length; i++) {
             bytes[i] = binaryString.charCodeAt(i);
@@ -447,7 +507,7 @@ class B2Service {
           status: 'valid'
         };
         
-        return btoa(JSON.stringify(mockMetadata));
+        return safeEncode(JSON.stringify(mockMetadata));
       }
       
       return null;
@@ -456,7 +516,7 @@ class B2Service {
     try {
       // Authorize with B2
       console.log(`Downloading file from B2: ${fileName}`);
-      const isAuthorized = await this.authorize();
+      const isAuthorized = await this.ensureAuthorized();
       if (!isAuthorized) {
         console.warn('Failed to authorize with B2 for download');
         return null;
@@ -500,7 +560,7 @@ class B2Service {
         for (let i = 0; i < bytes.byteLength; i++) {
           binary += String.fromCharCode(bytes[i]);
         }
-        content = btoa(binary);
+        content = safeEncode(binary);
         
         // Save in localStorage for future use
         this.saveFileToLocalStorage(fileName, content, contentType);
@@ -545,7 +605,7 @@ class B2Service {
     try {
       // Authorize with B2
       console.log(`Deleting file from B2: ${fileName}`);
-      const isAuthorized = await this.authorize();
+      const isAuthorized = await this.ensureAuthorized();
       if (!isAuthorized) {
         console.warn('Failed to authorize with B2 for file deletion');
         return false;
@@ -616,40 +676,25 @@ class B2Service {
       const filesStr = localStorage.getItem(this.STORAGE_KEY) || '{}';
       const files = JSON.parse(filesStr);
       
-      localFiles = Object.keys(files).filter(key => key.startsWith(prefix));
+      for (const fileName in files) {
+        if (fileName.startsWith(prefix)) {
+          localFiles.push(fileName);
+        }
+      }
     } catch (error) {
       console.error('Failed to list files from localStorage', error);
     }
     
-    // If we're in mock mode, return mock data
+    // If we're in mock mode, just return localStorage files
     if (this.useMock) {
       console.log(`Mock listing files with prefix: ${prefix}`);
-      if (localFiles.length > 0) {
-        return localFiles;
-      }
-      
-      // Generate mock files for common patterns
-      if (prefix.includes('employees') && prefix.includes('documents')) {
-        // For employee documents, generate some mock document files
-        return [
-          `${prefix}/passport_123456.pdf`,
-          `${prefix}/visa_987654.pdf`,
-          `${prefix}/labor_card_123456.pdf`
-        ];
-      }
-      
-      // Default mock files
-      return [
-        `${prefix}/mock_file1.json`,
-        `${prefix}/mock_file2.pdf`,
-        `${prefix}/mock_file3.jpg`
-      ];
+      return localFiles;
     }
     
     try {
       // Authorize with B2
       console.log(`Listing files from B2 with prefix: ${prefix}`);
-      const isAuthorized = await this.authorize();
+      const isAuthorized = await this.ensureAuthorized();
       if (!isAuthorized) {
         console.warn('Failed to authorize with B2 for listing files, using localStorage fallback');
         return localFiles;
@@ -665,7 +710,7 @@ class B2Service {
         body: JSON.stringify({
           bucketId: this.bucketName,
           prefix: prefix,
-          maxFileCount: 1000
+          maxFileCount: 1000 // Limit to 1000 files for performance
         })
       });
       
@@ -675,12 +720,13 @@ class B2Service {
       }
       
       const listFilesData = await listFilesResponse.json();
-      const b2Files = listFilesData.files.map((file: any) => file.fileName);
+      const files = listFilesData.files || [];
       
-      // Combine B2 files and local files
-      const allFiles = new Set([...b2Files, ...localFiles]);
+      // Merge with local files
+      const b2Files = files.map((file: any) => file.fileName);
+      const allFiles = [...new Set([...localFiles, ...b2Files])];
       
-      return Array.from(allFiles);
+      return allFiles;
     } catch (error) {
       console.error('Error listing files from B2:', error);
       return localFiles;
@@ -688,7 +734,7 @@ class B2Service {
   }
   
   /**
-   * Get system health information
+   * Get the health status of the B2 service
    */
   async getSystemHealth(): Promise<{
     status: 'ok' | 'degraded' | 'offline',
@@ -699,6 +745,7 @@ class B2Service {
       localStorage: boolean
     }
   }> {
+    let status: 'ok' | 'degraded' | 'offline' = 'ok';
     const details = {
       mockMode: this.useMock,
       authorized: false,
@@ -706,46 +753,51 @@ class B2Service {
       localStorage: true
     };
     
+    // Check if localStorage is working
     try {
-      // Check localStorage
-      try {
-        localStorage.setItem('b2_health_check', 'test');
-        localStorage.removeItem('b2_health_check');
-      } catch (e) {
-        details.localStorage = false;
-      }
+      const testKey = `b2_health_test_${Date.now()}`;
+      localStorage.setItem(testKey, 'test');
+      const testValue = localStorage.getItem(testKey);
+      localStorage.removeItem(testKey);
       
-      // If in mock mode, we're done
-      if (this.useMock) {
-        return {
-          status: details.localStorage ? 'ok' : 'degraded',
-          details
-        };
-      }
-      
-      // Check authorization
-      details.authorized = await this.authorize();
-      
-      // Check CORS configuration
-      details.corsConfig = await this.checkCorsConfiguration();
-      
-      // Determine overall status
-      let status: 'ok' | 'degraded' | 'offline' = 'ok';
-      
-      if (!details.authorized) {
-        status = 'offline';
-      } else if (!details.corsConfig || !details.localStorage) {
-        status = 'degraded';
-      }
-      
-      return { status, details };
-    } catch (error) {
-      console.error('Error checking B2 system health:', error);
+      details.localStorage = testValue === 'test';
+    } catch (e) {
+      details.localStorage = false;
+      status = 'degraded';
+    }
+    
+    // If we're in mock mode, just return success with mock details
+    if (this.useMock) {
       return {
-        status: 'offline',
-        details
+        status: 'ok',
+        details: {
+          ...details,
+          mockMode: true,
+          authorized: true,
+          corsConfig: true
+        }
       };
     }
+    
+    // Check authorization
+    details.authorized = await this.ensureAuthorized();
+    
+    // Check CORS configuration
+    if (details.authorized) {
+      details.corsConfig = await this.checkCorsConfiguration();
+    }
+    
+    // Determine overall status
+    if (!details.authorized) {
+      status = 'offline';
+    } else if (!details.corsConfig || !details.localStorage) {
+      status = 'degraded';
+    }
+    
+    return {
+      status,
+      details
+    };
   }
 }
 
